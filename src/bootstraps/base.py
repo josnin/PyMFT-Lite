@@ -1,19 +1,25 @@
 from src.application import message_bus, handlers
-from src.domain import commands, events
 
-def base_bootstrap(uow, cloud_adapter, onprem_adapter, slack_adapter=None):
-    storage_map = {"aws": cloud_adapter, "onprem": onprem_adapter}
-
-    command_handlers = {
-        commands.ProcessInbound: lambda c: handlers.handle_inbound(c, uow, storage_map),
-        commands.SendToCustomer: lambda c: handlers.handle_outbound(c, uow, storage_map),
+def base_bootstrap(uow, storage_map, slack_adapter=None):
+    """The 'Wiring' Logic"""
+    
+    # Inject dependencies into Command Handlers
+    injected_command_handlers = {
+        cmd_type: lambda cmd, h=handler: h(cmd, uow, storage_map)
+        for cmd_type, handler in handlers.COMMAND_HANDLERS.items()
     }
 
-    event_handlers = {
-        events.FileTransferred: [
-            lambda e: handlers.log_completion(e),
-            lambda e: handlers.notify_slack(e, slack_adapter) if slack_adapter else None,
+    # Inject dependencies into Event Handlers
+    injected_event_handlers = {
+        event_type: [
+            lambda e, h=handler: h(e, slack_adapter) 
+            for handler in handler_list
         ]
+        for event_type, handler_list in handlers.EVENT_HANDLERS.items()
     }
 
-    return message_bus.MessageBus(uow, command_handlers, event_handlers)
+    return message_bus.MessageBus(
+        uow=uow,
+        command_handlers=injected_command_handlers,
+        event_handlers=injected_event_handlers
+    )
